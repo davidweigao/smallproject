@@ -16,26 +16,22 @@ def getColors():
         yield 0xFF0000ff
 
 def getSteep():
-    brightness = 0xE1
+    brightness = 0xE0
     for i in xrange(60):
         if i % 2 == 0:
             brightness += 1
-        yield (brightness << 24) + 0xffffff
+        yield (brightness << 24) + 0xff55ff
 
-def rotateColor(c):
-    return c[-2:] + c[:-2]
+def rotateColor(c, i):
+    return c[-i:] + c[:-i]
 
 spi = spidev.SpiDev()
 spi.open(0,0)
-# color frames
 colors = list(getSteep())
-
 while True:
-    # start frame
+    print colors
     spi.xfer2([0x00, 0x00, 0x00, 0x00])
-    # spi.xfer2([0xff,0xff,0x00,0x00])
     spi.xfer2(list(convertToStripData(colors)))
-    # end frame
     spi.xfer2([0xFF, 0xFF, 0xFF, 0xFF])
-    colors = rotateColor(colors)
-    time.sleep(1.0/100)
+    colors = rotateColor(colors, 1)
+    time.sleep(1.0/4)
