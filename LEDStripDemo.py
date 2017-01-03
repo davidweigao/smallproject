@@ -22,7 +22,7 @@ for i in range(count.__len__()):
     strip.fill_smooth(count[i], 0, speed[i], 0xFFFF0000)
     while (strip.get_brightness(0) > 0xE0):
         strip.dim(count[i]-1)
-        time.sleep(1.0 / 32)
+        time.sleep(1.0 / 64)
     time.sleep(1.0 / 12)
 
 # for c in count:

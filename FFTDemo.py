@@ -1,83 +1,104 @@
 #!/usr/bin/env python
+# Written by Yu-Jie Lin
+# Public Domain
+#
+# Deps: PyAudio, NumPy, and Matplotlib
+# Blog: http://blog.yjl.im/2012/11/frequency-spectrum-of-sound-using.html
 
-# 8 bar Audio equaliser using MCP2307
+from __future__ import print_function
 
-import alsaaudio as aa
-import smbus
-from time import sleep
-from struct import unpack
+import struct
+import wave
+
+import matplotlib.animation as animation
+import matplotlib.pyplot as plt
 import numpy as np
 
-bus = smbus.SMBus(0)  # Use '1' for newer Pi boards;
+TITLE = ''
+WIDTH = 1280
+HEIGHT = 720
+FPS = 25.0
 
-ADDR = 0x20  # The I2C address of MCP23017
-DIRA = 0x00  # PortA I/O direction, by pin. 0=output, 1=input
-DIRB = 0x01  # PortB I/O direction, by pin. 0=output, 1=input
-BANKA = 0x12  # Register address for Bank A
-BANKB = 0x13  # Register address for Bank B
-
-# Set up the 23017 for 16 output pins
-bus.write_byte_data(ADDR, DIRA, 0);  # all zeros = all outputs on Bank A
-bus.write_byte_data(ADDR, DIRB, 0);  # all zeros = all outputs on Bank B
-
-
-def TurnOffLEDS():
-    bus.write_byte_data(ADDR, BANKA, 0xFF)  # set all columns high
-    bus.write_byte_data(ADDR, BANKB, 0x00)  # set all rows low
+nFFT = 512
+BUF_SIZE = 4 * nFFT
+SAMPLE_SIZE = 2
+CHANNELS = 2
+RATE = 44100
 
 
-def Set_Column(row, col):
-    TurnOffLEDS()
-    bus.write_byte_data(ADDR, BANKA, col)
-    bus.write_byte_data(ADDR, BANKB, row)
+def animate(i, line, wf, MAX_y):
+
+  N = (int((i + 1) * RATE / FPS) - wf.tell()) / nFFT
+  if not N:
+    return line,
+  N *= nFFT
+  data = wf.readframes(N)
+  print('{:5.1f}% - V: {:5,d} - A: {:10,d} / {:10,d}'.format(
+    100.0 * wf.tell() / wf.getnframes(), i, wf.tell(), wf.getnframes()
+  ))
+
+  # Unpack data, LRLRLR...
+  y = np.array(struct.unpack("%dh" % (len(data) / SAMPLE_SIZE), data)) / MAX_y
+  y_L = y[::2]
+  y_R = y[1::2]
+
+  Y_L = np.fft.fft(y_L, nFFT)
+  Y_R = np.fft.fft(y_R, nFFT)
+
+  # Sewing FFT of two channels together, DC part uses right channel's
+  Y = abs(np.hstack((Y_L[-nFFT / 2:-1], Y_R[:nFFT / 2])))
+
+  line.set_ydata(Y)
+  return line,
 
 
-# Initialise matrix
-TurnOffLEDS()
+def init(line):
 
-# Set up audio
-sample_rate = 44100
-no_channels = 2
-chunk = 512  # Use a multiple of 8
-data_in = aa.PCM(aa.PCM_CAPTURE, aa.PCM_NORMAL)
-data_in.setchannels(no_channels)
-data_in.setrate(sample_rate)
-data_in.setformat(aa.PCM_FORMAT_S16_LE)
-data_in.setperiodsize(chunk)
+  # This data is a clear frame for animation
+  line.set_ydata(np.zeros(nFFT - 1))
+  return line,
 
 
-def calculate_levels(data, chunk, sample_rate):
-    # Convert raw data to numpy array
-    data = unpack("%dh" % (len(data) / 2), data)
-    data = np.array(data, dtype='h')
-    # Apply FFT - real data so rfft used
-    fourier = np.fft.rfft(data)
-    # Remove last element in array to make it the same size as chunk
-    fourier = np.delete(fourier, len(fourier) - 1)
-    # Find amplitude
-    power = np.log10(np.abs(fourier)) ** 2
-    # Araange array into 8 rows for the 8 bars on LED matrix
-    power = np.reshape(power, (8, chunk / 8))
-    matrix = np.int_(np.average(power, axis=1) / 4)
-    return matrix
+def main():
+
+  dpi = plt.rcParams['figure.dpi']
+  plt.rcParams['savefig.dpi'] = dpi
+  plt.rcParams["figure.figsize"] = (1.0 * WIDTH / dpi, 1.0 * HEIGHT / dpi)
+
+  fig = plt.figure()
+
+  # Frequency range
+  x_f = 1.0 * np.arange(-nFFT / 2 + 1, nFFT / 2) / nFFT * RATE
+  ax = fig.add_subplot(111, title=TITLE, xlim=(x_f[0], x_f[-1]),
+                       ylim=(0, 2 * np.pi * nFFT ** 2 / RATE))
+  ax.set_yscale('symlog', linthreshy=nFFT ** 0.5)
+
+  line, = ax.plot(x_f, np.zeros(nFFT - 1))
+
+  # Change x tick labels for left channel
+  def change_xlabel(evt):
+    labels = [label.get_text().replace(u'\u2212', '')
+              for label in ax.get_xticklabels()]
+    ax.set_xticklabels(labels)
+    fig.canvas.mpl_disconnect(drawid)
+  drawid = fig.canvas.mpl_connect('draw_event', change_xlabel)
+
+  MAX_y = 2.0 ** (SAMPLE_SIZE * 8 - 1)
+  wf = wave.open('output.wav', 'rb')
+  assert wf.getnchannels() == CHANNELS
+  assert wf.getsampwidth() == SAMPLE_SIZE
+  assert wf.getframerate() == RATE
+  frames = wf.getnframes()
+
+  ani = animation.FuncAnimation(
+    fig, animate, int(frames / RATE * FPS),
+    init_func=lambda: init(line), fargs=(line, wf, MAX_y),
+    interval=1000.0 / FPS, blit=True
+  )
+  ani.save('temp.mp4', fps=FPS)
+
+  wf.close()
 
 
-print "Processing....."
-
-while True:
-    TurnOffLEDS()
-    # Read data from device
-    l, data = data_in.read()
-    data_in.pause(1)  # Pause capture whilst RPi processes data
-    if l:
-        # catch frame error
-        try:
-            matrix = calculate_levels(data, chunk, sample_rate)
-            for i in range(0, 8):
-                Set_Column((1 << matrix[i]) - 1, 0xFF ^ (1 << i))
-
-        except audioop.error, e:
-            if e.message != "not a whole number of frames":
-                raise e
-    sleep(0.001)
-    data_in.pause(0)  # Resume capture
+if __name__ == '__main__':
+  main()

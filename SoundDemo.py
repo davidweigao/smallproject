@@ -9,7 +9,7 @@ pyaud = pyaudio.PyAudio()
 # On my system, device 4 is a USB microphone
 stream = pyaud.open(
     format = pyaudio.paInt16,
-    channels = 1,
+    channels = 2,
     rate = 44100,
     input_device_index = 2,
     input = True)
@@ -21,6 +21,8 @@ while True:
         # Convert raw data to NumPy array
         samps = numpy.fromstring(rawsamps, dtype=numpy.int16)
         print samps
+        # frequencies = numpy.fft.rfft(samps)
+        # print frequencies
         # Show the volume and pitch
         # print analyse.loudness(samps), analyse.musical_detect_pitch(samps)
     except:
