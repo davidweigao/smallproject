@@ -1,14 +1,12 @@
 import pyaudio
 import sys
-import time
 import numpy
-import signal
 from LEDStrip import LEDStrip
 
 p = pyaudio.PyAudio()
-num_pixel = 30
+num_pixel = 60
 led_strip = LEDStrip(num_pixel)
-max_db = 60.0
+max_db = 50.0
 sample_rate = 44100 #Hz
 sample_per_buffer = 2**11
 db_per_pixel = float(max_db) / num_pixel
@@ -17,8 +15,8 @@ frequency_per_sample = sample_rate / sample_per_buffer
 def frequencyToIndex(frequency):
     return int(frequency / frequency_per_sample)
 
-def adjust_value(x):
-    return 20 * numpy.log10(abs(x)) - 50
+def normalize(x):
+    return 20 * numpy.log10(numpy.abs(x)) - 50
 
 def avg(list):
     return sum(list) / float(len(list))
@@ -31,7 +29,15 @@ def getDb(fft, start, end):
 def dbToPixel(db):
     db = min(max_db, db)
     pixel = int(db / db_per_pixel)
-    return pixel if pixel > 5 else 0
+    pixel = min(max(0, pixel), num_pixel-1)
+    return pixel
+
+def dbToColor(db):
+    db = min(max(0, db), max_db)
+    brightness = long(db / max_db * 31) + 0xe0
+    color = 0xff00ffL
+    color = (brightness << 24) + color
+    return color
 
 def print_spectrum(fft):
     out_str = ''
@@ -40,15 +46,18 @@ def print_spectrum(fft):
         out_str += "{0:g}\t ".format(db)
     print out_str
 
-def callback(in_data, frame_count, time_info, status):
+def handleData(in_data):
     samples = numpy.fromstring(in_data, dtype=numpy.int16)
     fft = numpy.fft.fft(samples)
-    fft = map(adjust_value, fft.tolist())
-    db = getDb(fft, 7200, 8200)
+    fft = normalize(fft)
+    db = getDb(fft, 7300, 7400)
     led_pixel = dbToPixel(db)
-    print "db: {}, Pixel: {}".format(db, led_pixel)
-    led_strip.fill(led_pixel, 0xff00ff)
-    time.sleep(0.1)
+    color = dbToColor(db)
+    print "db: {}, Pixel: {}, color: {}".format(db, led_pixel, hex(color))
+    # led_strip.dark()
+    # led_strip.set_color(led_pixel, 0xff00ff)
+    # led_strip.show()
+    led_strip.fill(led_pixel, color)
     return (None, pyaudio.paContinue)
 
 
@@ -65,13 +74,15 @@ try:
                     channels=1,
                     rate=sample_rate,
                     input=True,
-                    output=False,
-                    input_device_index = 2)
+                    # input_device_index=2,
+                    output=False)
     stream.start_stream()
     while True:
+        stream.start_stream()
         in_data = stream.read(sample_per_buffer, exception_on_overflow=False)
-        callback(in_data, 0, None, None)
-        time.sleep(0.05)
+        stream.stop_stream()
+        handleData(in_data)
+        # time.sleep(0.1)
 except Exception as e:
     print e
 finally:
