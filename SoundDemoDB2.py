@@ -1,126 +1,103 @@
-# Python 2.7 code to analyze sound and interface with Arduino
-
-import pyaudio  # from http://people.csail.mit.edu/hubert/pyaudio/
-import numpy  # from http://numpy.scipy.org/
-import audioop
+import pyaudio
 import sys
-import math
-import struct
+import numpy
 from LEDStrip import LEDStrip
 
-led_strip = LEDStrip(60)
+p = pyaudio.PyAudio()
+num_pixel = 36
+led_strip = LEDStrip(72 * 4)
+max_db = 24.0
+sample_rate = 44100 #Hz
+sample_per_buffer = 2**11
+db_per_pixel = float(max_db) / num_pixel
 
-'''
-Sources
+frequency_per_sample = sample_rate / sample_per_buffer
 
-http://www.swharden.com/blog/2010-03-05-realtime-fft-graph-of-audio-wav-file-or-microphone-input-with-python-scipy-and-wckgraph/
-http://macdevcenter.com/pub/a/python/2001/01/31/numerically.html?page=2
+def getLedIndex(index, pixel):
+    if index % 2 == 0:
+        return index / 2 * 72 + pixel
+    else:
+        return (index+1) / 2 * 72 - 1 -pixel
 
-'''
+def fillLedIndex(index, pixel):
+    if index % 2 == 0:
+        start = index / 2 * 72
+        end = start + pixel
+    else:
+        start = (index+1) / 2 * 72 - 1 - pixel
+        end = (index+1) / 2 * 72 - 1
+    for i in range(start, end):
+        led_strip.set_color(i, 0xe5ff00ff)
 
-MAX = 0
+def frequencyToIndex(frequency):
+    return int(frequency / frequency_per_sample)
+
+def normalize(x):
+    return 20 * numpy.log10(numpy.abs(x)) - 50 - 10
+
+def avg(list):
+    return sum(list) / float(len(list))
+
+def getDb(fft, start, end):
+    from_index = frequencyToIndex(start)
+    until_index = frequencyToIndex(end) + 1
+    return avg(fft[from_index:until_index])
+
+def dbToPixel(db):
+    db = min(max_db, db)
+    pixel = int(db / db_per_pixel)
+    pixel = min(max(0, pixel), num_pixel-1)
+    return pixel
+
+def dbToColor(db):
+    db = min(max(0, db), max_db)
+    color = long(db / max_db * 255)
+    return color + 0xff0000
+
+def print_spectrum(fft):
+    out_str = ''
+    for i in range(0, len(fft), 50):
+        db = getDb(fft, i, i + 50)
+        out_str += "{0:g}\t ".format(db)
+    print out_str
+
+def handleData(in_data):
+    samples = numpy.fromstring(in_data, dtype=numpy.int16)
+    fft = numpy.fft.fft(samples)
+    fft = normalize(fft)
+    led_strip.set_dark()
+    for i in range(0, 8):
+        db = getDb(fft, i * 500 + 200, (i+1) * 500)
+        print db
+        fillLedIndex(i, dbToPixel(db))
+    led_strip.show()
+    return (None, pyaudio.paContinue)
 
 
-def list_devices():
-    # List all audio input devices
-    p = pyaudio.PyAudio()
-    i = 0
-    n = p.get_device_count()
-    while i < n:
-        dev = p.get_device_info_by_index(i)
-        if dev['maxInputChannels'] > 0:
-            print str(i) + '. ' + dev['name']
-        i += 1
+# This is to release mic when the program  exit
+def interrupt_callback():
+    print "interrupted manually"
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
+    sys.exit()
 
-
-def arduino_soundlight():
-    chunk = 2 ** 11  # Change if too fast/slow, never less than 2**11
-    scale = 50  # Change if too dim/bright
-    exponent = 5  # Change if too little/too much difference between loud and quiet sounds
-    samplerate = 44100
-
-    # CHANGE THIS TO CORRECT INPUT DEVICE
-    # Enable stereo mixing in your sound card
-    # to make you sound output an input
-    # Use list_devices() to list all your input devices
-    device = 2
-
-    p = pyaudio.PyAudio()
+try:
     stream = p.open(format=pyaudio.paInt16,
                     channels=1,
-                    rate=44100,
+                    rate=sample_rate,
                     input=True,
-                    # input_device_index=device,
-                    frames_per_buffer=chunk,
-                )
+                    # input_device_index=2,
+                    output=False)
+    stream.start_stream()
+    while True:
+        stream.start_stream()
+        in_data = stream.read(sample_per_buffer, exception_on_overflow=False)
+        stream.stop_stream()
+        handleData(in_data)
+        # time.sleep(0.1)
+except Exception as e:
+    print e
+finally:
+    interrupt_callback()
 
-    print "Starting, use Ctrl+C to stop"
-    try:
-        while True:
-            data = stream.read(chunk, exception_on_overflow=False)
-
-            '''
-           # Old RMS code, will only show the volume
-
-           rms   = audioop.rms(data, 2)
-
-           level = min(rms / (2.0 ** 16) * scale, 1.0)
-           level = level**exponent
-           level = int(level * 255)
-
-           print level
-           ser.write(chr(level))
-           '''
-
-            # Do FFT
-            levels = calculate_levels(data, chunk, samplerate)
-            print levels[2]
-            if (levels[2] > 0):
-                led_strip.fill(50, 0xff00ff)
-            else:
-                led_strip.fill(0, 0xff00ff)
-            # Make it look better and send to serial
-            for level in levels:
-                level = max(min(level / scale, 1.0), 0.0)
-                level = level ** exponent
-                level = int(level * 255)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print "\nStopping"
-        stream.close()
-        p.terminate()
-
-
-def calculate_levels(data, chunk, samplerate):
-    # Use FFT to calculate volume for each frequency
-    global MAX
-
-    # Convert raw sound data to Numpy array
-    fmt = "%dH" % (len(data) / 2)
-    data2 = struct.unpack(fmt, data)
-    data2 = numpy.array(data2, dtype='h')
-
-    # Apply FFT
-    fourier = numpy.fft.fft(data2)
-    ffty = numpy.abs(fourier[0:len(fourier) / 2]) / 1000
-    ffty1 = ffty[:len(ffty) / 2]
-    ffty2 = ffty[len(ffty) / 2::] + 2
-    ffty2 = ffty2[::-1]
-    ffty = ffty1 + ffty2
-    ffty = numpy.log(ffty) - 2
-
-    fourier = list(ffty)[4:-4]
-    fourier = fourier[:len(fourier) / 2]
-
-    size = len(fourier)
-
-    # Add up for 6 lights
-    levels = [sum(fourier[i:(i + size / 6)]) for i in xrange(0, size, size / 6)][:6]
-
-    return levels
-
-
-if __name__ == '__main__':
-    # list_devices()
-    arduino_soundlight()

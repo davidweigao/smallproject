@@ -16,7 +16,7 @@ def frequencyToIndex(frequency):
     return int(frequency / frequency_per_sample)
 
 def normalize(x):
-    return 20 * numpy.log10(numpy.abs(x)) - 50
+    return 20 * numpy.log10(numpy.abs(x)) - 50 - 26
 
 def avg(list):
     return sum(list) / float(len(list))
@@ -34,10 +34,8 @@ def dbToPixel(db):
 
 def dbToColor(db):
     db = min(max(0, db), max_db)
-    brightness = long(db / max_db * 31) + 0xe0
-    color = 0xff00ffL
-    color = (brightness << 24) + color
-    return color
+    color = long(db / max_db * 255)
+    return color + 0xff0000
 
 def print_spectrum(fft):
     out_str = ''
@@ -50,7 +48,7 @@ def handleData(in_data):
     samples = numpy.fromstring(in_data, dtype=numpy.int16)
     fft = numpy.fft.fft(samples)
     fft = normalize(fft)
-    db = getDb(fft, 7300, 7400)
+    db = getDb(fft, 450, 550)
     led_pixel = dbToPixel(db)
     color = dbToColor(db)
     print "db: {}, Pixel: {}, color: {}".format(db, led_pixel, hex(color))

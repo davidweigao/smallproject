@@ -104,6 +104,9 @@ class LEDStrip:
         self.colorCache = [0x000000] * self.pixelNum
         self.show()
 
+    def set_dark(self):
+        self.colorCache = [0x000000] * self.pixelNum
+
     def getColor(self, index):
         return self.colorCache[index]
 
