@@ -1,15 +1,16 @@
 import pyaudio
 import sys
 import numpy
-from LEDStrip import LEDStrip
+from LEDStrip import LEDStrip, LEDScreen
 
 p = pyaudio.PyAudio()
-num_pixel = 36
-led_strip = LEDStrip(72 * 4)
-max_db = 24.0
+row = 8
+column = 72 * 4 / row
+led_screen = LEDScreen(LEDStrip(row * column), row, column)
+max_db = 50.0
 sample_rate = 44100 #Hz
 sample_per_buffer = 2**11
-db_per_pixel = float(max_db) / num_pixel
+db_per_pixel = float(max_db) / column
 
 frequency_per_sample = sample_rate / sample_per_buffer
 
@@ -20,14 +21,10 @@ def getLedIndex(index, pixel):
         return (index+1) / 2 * 72 - 1 -pixel
 
 def fillLedIndex(index, pixel):
-    if index % 2 == 0:
-        start = index / 2 * 72
-        end = start + pixel
-    else:
-        start = (index+1) / 2 * 72 - 1 - pixel
-        end = (index+1) / 2 * 72 - 1
-    for i in range(start, end):
-        led_strip.set_color(i, 0xe5ff00ff)
+    colors = list(0 for _ in range(0, column))
+    for i in range(0, pixel):
+        colors[i] = 0xe1ff00ff
+    led_screen.showRow(index, colors)
 
 def frequencyToIndex(frequency):
     return int(frequency / frequency_per_sample)
@@ -46,7 +43,7 @@ def getDb(fft, start, end):
 def dbToPixel(db):
     db = min(max_db, db)
     pixel = int(db / db_per_pixel)
-    pixel = min(max(0, pixel), num_pixel-1)
+    pixel = min(max(0, pixel), column-1)
     return pixel
 
 def dbToColor(db):
@@ -65,12 +62,11 @@ def handleData(in_data):
     samples = numpy.fromstring(in_data, dtype=numpy.int16)
     fft = numpy.fft.fft(samples)
     fft = normalize(fft)
-    led_strip.set_dark()
-    for i in range(0, 8):
+    for i in range(0, row):
         db = getDb(fft, i * 500 + 200, (i+1) * 500)
         print db
         fillLedIndex(i, dbToPixel(db))
-    led_strip.show()
+    led_screen.refresh()
     return (None, pyaudio.paContinue)
 
 

@@ -86,6 +86,14 @@ class LEDStrip:
         self.colorCache = [color] * min(self.pixelNum, length) + [0x000000] * (self.pixelNum - length)
         self.show()
 
+    def fill_range(self, start, end, colors):
+        offset = abs(start - end)
+        step = 1 if start < end else -1
+        j = 0
+        for i in range(start, end, step):
+            self.colorCache[i] = colors[j]
+            j += 1
+
     def fill_smooth(self, length, start, speed, color):
         for i in xrange(start, length, 1 if start < length else -1):
             self.fill(i, color)
@@ -113,6 +121,30 @@ class LEDStrip:
     def get_brightness(self, index):
         color = self.colorCache[index]
         return color >> 24
+
+class LEDScreen:
+    # row * column <= ledStrip.pixelNum
+    def __init__(self, ledStrip, row, column):
+        self.strip = ledStrip
+        self.row = row
+        self.column = column
+
+    def show(self, pixelArray):
+        for index in range(0, len(pixelArray)):
+            row = pixelArray[index]
+            self.showRow(index, row)
+
+    def showRow(self, index, colors):
+        if index % 2 == 0:
+            start = index * self.column
+            end = start + len(colors)
+        else:
+            start = (index + 1) * self.column - 1
+            end = start - len(colors)
+        self.strip.fill_range(start, end, colors)
+
+    def refresh(self):
+        self.strip.show()
 
 if __name__ == '__main__':
     c = 0xffff0000
