@@ -56,7 +56,7 @@ class LEDStrip:
     def __init__(self, pixelNum):
         self.spi = spidev.SpiDev()
         self.spi.open(0, 0)
-        self.spi.max_speed_hz = 20000000
+        self.spi.max_speed_hz = 8000000
         self.colorCache = [0xff000000] * pixelNum
         self.rotateThread = RotateThread(self)
         self.is_rotating = False
